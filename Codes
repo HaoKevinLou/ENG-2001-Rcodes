@@ -1,0 +1,181 @@
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(psych)
+library(stargazer)
+library(broom)
+library(zoo)
+library(ggplot2)
+library(corrplot)
+library(biotools)
+library(ggpubr)
+library(kableExtra)
+rm(list = ls())
+setwd("C:\\Users\\Kevin\\OneDrive - CBS - Copenhagen Business School\\桌面\\ENG2001")
+#==== Data Preparation=====
+file_paths <- list.files(path = "C:\\Users\\Kevin\\OneDrive - CBS - Copenhagen Business School\\桌面\\ENG2001", pattern = "*.csv", full.names = TRUE)
+data_list <- lapply(file_paths, read.csv)
+cnm_data <- do.call(rbind, data_list)
+
+summary(cnm_data$Age)
+table(cnm_data$Gender)
+table(cnm_data$Current.Relationship.Status)
+table(cnm_data$Previous.Relationship.Status)
+table(cnm_data$Year.of.Study)
+table(cnm_data$Relationship.Description)
+
+cnm_data <- cnm_data %>%
+  rename(
+    age = Age,
+    gender = Gender,
+    current_relationship_status = Current.Relationship.Status,
+    previous_relationship_status = Previous.Relationship.Status,
+    year_of_study = Year.of.Study,
+    relationship_description = Relationship.Description,
+    clean_dirty = Clean...Dirty,
+    immoral_moral = Immoral...Moral,
+    normal_kinky = Normal.....Kinky.,
+    adventurous_non_adventurous = Adventurous...Non.adventurous,
+    irresponsible_responsible = Irresponsible...Responsible,
+    creepy_comforting = Creepy...Comforting,
+    traditional_radical = Traditional...Radical,
+    unsatisfied_satisfied_relationship = Unsatisfied...Satisfied.in.their.relationship,
+    motivated_by_pleasure_duty = Motivated.by.pleasure...Motivated.by.duty,
+    immature_mature = Immature...Mature,
+    family_oriented_self_oriented = Family.oriented...Self.oriented,
+    chauvinistic_feminist = Chauvinistic...Feminist,
+    happy_unhappy = Happy...Unhappy,
+    satisfied_life_unsatisfied_life = Satisfied.with.life...Unsatisfied.with.life,
+    conventional_unconventional = Conventional...Unconventional,
+    closed_to_new_experiences_open_to_new_experiences = Closed.to.new.experiences...Open.to.new.experiences,
+    unable_to_express_emotions_able_to_express_emotions = Unable.to.express.emotions...Able.to.express.emotions
+  )
+
+cnm_data$relationship_description <- factor(cnm_data$relationship_description, 
+                                            levels = c(1, 2, 3), 
+                                            labels = c("Swinging", "Open Relationship", "Polyamory"))
+# Convert gender to factor
+cnm_data$gender <- factor(cnm_data$gender, levels = c(0, 1), labels = c("Female", "Male"))
+#====Descriptive Statistics===== 
+attitude_items <- cnm_data %>% select(
+  clean_dirty, immoral_moral, normal_kinky, 
+  adventurous_non_adventurous, irresponsible_responsible, 
+  creepy_comforting, traditional_radical, 
+  unsatisfied_satisfied_relationship, 
+  motivated_by_pleasure_duty, 
+  immature_mature, family_oriented_self_oriented, 
+  chauvinistic_feminist, happy_unhappy, 
+  satisfied_life_unsatisfied_life, 
+  conventional_unconventional, 
+  closed_to_new_experiences_open_to_new_experiences, 
+  unable_to_express_emotions_able_to_express_emotions
+)
+
+# Reverse code items if necessary (depending on your scale direction)
+#====Overall Attitudes ===== 
+#Calculate overall mean for each item
+overall_means <- colMeans(attitude_items, na.rm = TRUE)
+print(overall_means)
+
+# Create a data frame for plotting
+overall_means_df <- data.frame(
+  Attribute = names(overall_means),
+  Mean_Score = overall_means
+)
+
+# Plot
+ggplot(overall_means_df, aes(x = reorder(Attribute, Mean_Score), y = Mean_Score)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Overall Mean Attitude Scores Towards CNM",
+       x = "Attribute",
+       y = "Mean Score")
+#-----------------------------------------------------------------------------------------------------------------------
+means_sd <- cnm_data %>%
+  group_by(relationship_description) %>%
+  summarise(across(all_of(dv_columns), 
+                   list(mean = ~ mean(.x, na.rm = TRUE),
+                        sd = ~ sd(.x, na.rm = TRUE)),
+                   .names = "{.col}_{.fn}")) %>%
+  pivot_longer(-relationship_description, 
+               names_to = c("Item", ".value"), 
+               names_pattern = "(.*)_(mean|sd)") %>%
+  arrange(Item, relationship_description) %>%
+  mutate(Mean_SD = paste0(round(mean, 2), " (", round(sd, 2), ")"))
+
+final_table <- means_sd %>%
+  dplyr::select(Item, relationship_description, Mean_SD) %>%
+  pivot_wider(names_from = relationship_description, values_from = Mean_SD) %>%
+  arrange(Item)
+
+formatted_table <- final_table %>%
+  arrange(Item) %>%
+  kable(format = "html", 
+        caption = "Means (Standard Deviations) of Perceptions of Relationship Types",
+        align = 'lccc') %>%
+  kable_styling(full_width = FALSE, position = "center", 
+                bootstrap_options = c("striped", "hover", "condensed")) %>%
+  add_header_above(c(" " = 1, "Relationship Type" = 3)) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 12) %>%
+  footnote(general = "Note: Standard deviations are in parentheses.",
+           general_title = "",
+           footnote_as_chunk = TRUE,
+           escape = FALSE)
+
+# Display the table
+formatted_table
+#====Comparative Analysis===== 
+# If scale is reliable, compute overall attitude score
+cnm_data$overall_attitude <- rowMeans(attitude_items, na.rm = TRUE)
+
+dv_columns <- c("clean_dirty", "immoral_moral", "normal_kinky",
+                "adventurous_non_adventurous", "irresponsible_responsible",
+                "creepy_comforting", "traditional_radical",
+                "unsatisfied_satisfied_relationship",
+                "motivated_by_pleasure_duty",
+                "immature_mature", "family_oriented_self_oriented",
+                "chauvinistic_feminist", "happy_unhappy",
+                "satisfied_life_unsatisfied_life",
+                "conventional_unconventional",
+                "closed_to_new_experiences_open_to_new_experiences",
+                "unable_to_express_emotions_able_to_express_emotions")
+
+# Check if all DVs are numeric
+cnm_data %>% select(all_of(dv_columns)) %>% summarise_all(is.numeric)
+# Checking MANOVA Assumptions
+#a. Multivariate Normality
+shapiro_results <- cnm_data %>%
+  group_by(relationship_description) %>%
+  summarise(across(all_of(dv_columns), ~ shapiro.test(.x)$p.value))
+
+print(shapiro_results,max_extra_cols = 18)
+#Interpretation: p-values > 0.05 indicate no evidence against normality.
+
+# Box's M test using the 'biotools' package
+box_m_test <- boxM(cnm_data[, dv_columns], cnm_data$relationship_description)
+print(box_m_test)
+
+cor_matrix <- cor(cnm_data[, dv_columns], use = "complete.obs")
+print(cor_matrix)
+
+
+# Visualize with corrplot
+corrplot(cor_matrix, method = "circle", type = "upper", tl.cex = 0.6)
+# Perform MANOVA
+manova_model <- manova(cbind(clean_dirty, immoral_moral, normal_kinky,
+                             adventurous_non_adventurous, irresponsible_responsible,
+                             creepy_comforting, traditional_radical,
+                             unsatisfied_satisfied_relationship,
+                             motivated_by_pleasure_duty,
+                             immature_mature, family_oriented_self_oriented,
+                             chauvinistic_feminist, happy_unhappy,
+                             satisfied_life_unsatisfied_life,
+                             conventional_unconventional,
+                             closed_to_new_experiences_open_to_new_experiences,
+                             unable_to_express_emotions_able_to_express_emotions) ~ relationship_description, 
+                       data = cnm_data)
+
+# Summary with Pillai's Trace
+summary(manova_model, test = "Pillai")
+
